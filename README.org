@@ -1,0 +1,13 @@
+* bf: A Brainf*** interpreter written in C
+This is my Brainf*** interpreter written in C. The array is only 1024 bytes
+long. Right now it only implements the 6 characters: ~>~, ~<~, ~+~, ~-~, ~.~,
+and ~,~ since I haven't been able to handle the loop characters ~[~ and ~]~
+well, but hopefully in the future I will fix that. In addition, it does not
+handle the pointer moving outsite the array, so it can crash if your Brainf***
+program is not well written.
+** How to compile and run
+#+begin_src shell
+make
+./bf FILE
+#+end_src
+where FILE is the name of a Brainf*** program.
