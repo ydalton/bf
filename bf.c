@@ -1,108 +1,177 @@
-#include <stdio.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <errno.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <assert.h>
+#include <fcntl.h>
 
-#define ARR_LEN 1024
-#define FILE_MAX 1024
+#define	ARRAY_SIZE	1024
 
-#define DIE_IF(cond, s)							\
-		if(cond) {								\
-				perror(s);						\
-				return -1;						\
-		}										\
+#define	eprintf(...)	fprintf(stderr, __VA_ARGS__)
+#define eputs(s)	fputs(s, stderr)
 
-int main(int argc, char **argv) {
-		char arr[ARR_LEN];
-		char c, *ptr, *code;
-		unsigned int instr_ptr, loop_num, i, code_len;
-		FILE *fp;
+static size_t get_file_size_from_fd(int fd)
+{
+	size_t len;
+	int pos;
 
-		if(argc != 2) {
-				printf("usage: %s FILE\n", argv[0]);
-				return -1;
-		}
+	/* get current position */
+	pos = lseek(fd, 0L, SEEK_SET);
+	len = lseek(fd, 0L, SEEK_END);
+	/* restore to original position */
+	lseek(fd, 0L, pos);
 
-		fp = fopen(argv[1], "r");
-		DIE_IF(!fp, "fopen");
+	return len;
+}
 
-		code = (char *) malloc(FILE_MAX);
-		DIE_IF(!code, "malloc");
+static const char *find_matching_backward(const char *s, const char *start)
+{
+	int depth = 0;
+	s--;
 
-		for(i = 0; i < FILE_MAX; i++) {
-				c = getc(fp);
-				if(c == EOF)
-						break;
-				code[i] = c;
-		}
-		fclose(fp);
+	do {
+		if(*s == '[') {
+			if(depth == 0)
+				return s;
+			else
+				depth++;
+		} else if(*s == ']')
+			depth--;
+	} while (s-- >= start);
 
-		code_len = i;
-		/* set the pointer to the beginning of the array */
-		ptr = arr;
-		/* zero out the entire array, without using memset */
-		for(i = 0; i < ARR_LEN; i++)
-				arr[i] = 0;
-		/* start from the beginning */
-		instr_ptr = 0;
-		/* set loop counter to 0 */
-		loop_num = 0;
-		/* loop over each character in the loop */
-		while(instr_ptr < code_len) {
-				c = code[instr_ptr];
-				switch(c) {
-						/* ignoring the newline or space... */
-				case ' ':
-				case '\n':
-						continue;
-				case '+':
-						(*ptr)++;
-						break;
-				case '>':
-						ptr++;
-						break;
-				case '<':
-						ptr--;
-						break;
-				case '-':
-						(*ptr)--;
-						break;
-				case '.':
-						putchar(*ptr);
-						break;
-				case ',': {
-						char tmp;
-						tmp = getchar();
-						*ptr = tmp;
+	return NULL;
+}
+
+static const char *find_matching_forward(const char *s)
+{
+	const char *pos = s + 1;
+	int depth = 0;
+
+	do {
+		if(*pos == ']') {
+			if(depth == 0)
+				return pos + 1;
+			else
+				depth++;
+		} else if(*pos == '[')
+			depth--;
+	} while (*(pos++));
+
+	return NULL;
+}
+
+int bf_mainloop(char *file, size_t file_size)
+{
+	const char *file_ptr;
+	char *byte_array;
+	char *byte_ptr;
+	int ret = EXIT_SUCCESS;
+
+	byte_array = calloc(1, ARRAY_SIZE);
+	if(!byte_array) {
+		perror("calloc");
+		return EXIT_FAILURE;
+	}
+
+	byte_ptr = byte_array;
+	file_ptr = file;
+
+	while(file_ptr <= (file + file_size)) {
+		switch(*file_ptr) {
+		case '>':
+			if(byte_ptr <= byte_array + ARRAY_SIZE)
+				byte_ptr++;
+			break;
+		case '<':
+			if(byte_ptr >= byte_array)
+				byte_ptr--;
+			break;
+		case '+':
+			(*byte_ptr)++;
+			break;
+		case '-':
+			(*byte_ptr)--;
+			break;
+		case '.':
+			putchar(*byte_ptr);
+			break;
+		/* I don't think we need input just yet */
+		case ',': {
+				int c = getchar();
+				if(c == EOF) {
+					eputs("Unexpected EOF encountered. Aborting...\n");
+					ret = EXIT_FAILURE;
+					goto out;
 				}
-						break;
-				case '[':
-						loop_num++;
-						break;
-				case ']':
-
-						if(*ptr != 0) {
-								while(1) {
-										instr_ptr--;
-										if(code[instr_ptr] == '[')
-												break;
-								}
-								break;
-						}
-						loop_num--;
-						break;
+			 	*byte_ptr = c;
+			}
+			break;
+		case '[':
+			if((*byte_ptr == 0)) {
+				file_ptr = find_matching_forward(file_ptr);
+				if(!file_ptr) {
+					eputs("No matching ']' for '['. Aborting...\n");
+					ret = EXIT_FAILURE;
+					goto out;
 				}
-#if 0
-				/* print where the pointer is */
-				printf("%s", code);
-				for(i = 0; i < instr_ptr; i++)
-						putchar(' ');
-				printf("^\n");
-#endif
-				instr_ptr++;
+			}
+			break;
+		case ']':
+			if((*byte_ptr != 0)) {
+				file_ptr = find_matching_backward(file_ptr, file);
+				if(!file_ptr) {
+					eputs("No matching '[' for ']'. Aborting...\n");
+					ret = EXIT_FAILURE;
+					goto out;
+				}
+			}
+			break;
+		/* Brainf*** ignores all other characters... */
+		default:
+			break;
 		}
-		free(code);
-		if(loop_num != 0) {
-				puts("Something has gone wrong");
-				return -1;
-		}
-		return 0;
+		file_ptr++;
+	}
+
+out:
+	free(byte_array);
+	return ret;
+}
+
+static void usage(int code, char *name)
+{
+	printf("usage: %s FILE\n", name);
+	exit(code);
+}
+
+int main(int argc, char **argv)
+{
+	size_t file_size;
+	char *file;
+	int fd;
+
+	if(argc != 2)
+		usage(EXIT_FAILURE, argv[0]);
+
+	fd = open(argv[1], O_RDONLY);
+	if(fd < 0) {
+		eprintf("%s: %s: %s\n", argv[0], argv[1], strerror(errno));
+		return EXIT_FAILURE;
+	}
+
+	file_size = get_file_size_from_fd(fd);
+
+	file = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+	if(!file) {
+		perror("mmap");
+		return EXIT_FAILURE;
+	}
+	close(fd);
+
+	assert(bf_mainloop(file, file_size) == EXIT_SUCCESS);
+	munmap(file, file_size);
+
+	return EXIT_SUCCESS;
 }

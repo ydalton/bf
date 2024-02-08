@@ -1,10 +1,11 @@
-CFLAGS := -Wall -Wextra -Wpedantic
+CFLAGS	:=	-g -Wall -Wextra -Wpedantic -Werror=implicit-function-declaration -Wno-unused-function
+TARGET	:=	bf
+OBJ	:=	bf.o
 
-objs := bf.o
+$(TARGET): $(OBJ)
+	gcc -o $@ $<
 
-all: $(objs)
-	cc -o bf bf.o
-clean: 
-	rm -f bf $(objs)
+clean:
+	rm -f $(TARGET) $(OBJ)
 
-.PHONY: all clean
+.PHONY: $(TARGET) clean
